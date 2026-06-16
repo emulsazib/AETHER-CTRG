@@ -1,0 +1,32 @@
+{
+  "_source": "MOCK of Splunk Attack Data (https://github.com/splunk/attack_data) — structured logs of malware behaviors. Replace with a real Splunk export / API pull.",
+  "events": [
+    {
+      "event_id": "splunk-0001",
+      "host": "WIN-FIN-07",
+      "process": "powershell.exe",
+      "command_line": "powershell -enc JABzAD0ATgBlAHcA...",
+      "mitre_techniques": ["T1059.001", "T1027"],
+      "behavior": "Encoded PowerShell downloader spawning child process",
+      "timestamp": "2026-05-12T09:14:22Z"
+    },
+    {
+      "event_id": "splunk-0002",
+      "host": "WIN-HR-02",
+      "process": "rundll32.exe",
+      "command_line": "rundll32.exe shell32.dll,Control_RunDLL evil.cpl",
+      "mitre_techniques": ["T1218.011"],
+      "behavior": "Proxy execution via rundll32 of suspicious control panel item",
+      "timestamp": "2026-05-13T11:02:47Z"
+    },
+    {
+      "event_id": "splunk-0003",
+      "host": "WIN-DEV-11",
+      "process": "wscript.exe",
+      "command_line": "wscript.exe C:\\Users\\Public\\update.js",
+      "mitre_techniques": ["T1059.007", "T1105"],
+      "behavior": "JScript dropper retrieving a second-stage payload",
+      "timestamp": "2026-05-15T16:41:09Z"
+    }
+  ]
+}

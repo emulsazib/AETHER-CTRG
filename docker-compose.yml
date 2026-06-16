@@ -1,0 +1,120 @@
+# =============================================================================
+# AETHER Framework — FULL STACK (databases + all three services)
+# -----------------------------------------------------------------------------
+# One command to run everything:
+#     docker compose up --build
+#
+# Services & published ports:
+#     frontend    -> http://localhost:5173   (nginx-served React SPA)
+#     backend     -> http://localhost:4000    (Node/Express API gateway)
+#     ml-worker   -> http://localhost:8000    (Python/FastAPI inference)
+#     mongo       -> localhost:27017
+#     neo4j       -> http://localhost:7474 (browser) / bolt 7687
+#
+# Inter-container traffic uses service names as hostnames on the default network
+# (e.g. backend reaches the worker at http://ml-worker:8000). The browser talks
+# to the gateway via the host-published http://localhost:4000 (baked into the
+# frontend at build time via VITE_API_BASE).
+# =============================================================================
+
+services:
+  mongo:
+    image: mongo:7
+    container_name: aether-mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-aether}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-aether_dev_pw}
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  neo4j:
+    image: neo4j:5
+    container_name: aether-neo4j
+    restart: unless-stopped
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-aether_dev_pw}
+      NEO4J_PLUGINS: '["apoc"]'
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    healthcheck:
+      # cypher-shell ships in the image; succeeds only once Bolt accepts auth.
+      # Single-$ => compose bakes the credentials in at parse time.
+      test: ["CMD-SHELL", "cypher-shell -u ${NEO4J_USER:-neo4j} -p ${NEO4J_PASSWORD:-aether_dev_pw} 'RETURN 1' || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  ml-worker:
+    build: ./ml-worker
+    container_name: aether-ml-worker
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      ML_WORKER_PORT: 8000
+      # Allow the gateway (and host browser, for debugging) to call directly.
+      ML_CORS_ORIGINS: http://localhost:4000,http://localhost:5173
+      EMBEDDING_DIM: 16
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    container_name: aether-backend
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    environment:
+      PORT: 4000
+      NODE_ENV: production
+      # Browser origin allowed by CORS (the nginx-served frontend).
+      CORS_ORIGINS: http://localhost:5173
+      # Service-name hostnames on the compose network.
+      MONGO_URI: mongodb://${MONGO_USER:-aether}:${MONGO_PASSWORD:-aether_dev_pw}@mongo:27017/aether?authSource=admin
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: ${NEO4J_USER:-neo4j}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-aether_dev_pw}
+      ML_WORKER_URL: http://ml-worker:8000
+      ML_WORKER_TIMEOUT_MS: 15000
+    depends_on:
+      mongo:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      ml-worker:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Baked into the bundle — must be the HOST-reachable gateway URL.
+        VITE_API_BASE: http://localhost:4000/api/v1
+        VITE_POLL_INTERVAL_MS: 2000
+    container_name: aether-frontend
+    restart: unless-stopped
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+
+volumes:
+  mongo_data:
+  neo4j_data:
+  neo4j_logs:

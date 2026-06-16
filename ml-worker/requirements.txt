@@ -1,0 +1,8 @@
+# AETHER AI/ML Worker dependencies (mock pipeline — lightweight by design).
+# Loose lower-bound pins so prebuilt wheels resolve across Python 3.10–3.14.
+# When you swap in REAL models, add e.g. torch, transformers, faiss-cpu,
+# umap-learn, shap, lime, pillow here.
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic>=2.9
+python-dotenv>=1.0

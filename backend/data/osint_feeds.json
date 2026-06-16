@@ -1,0 +1,37 @@
+{
+  "_source": "MOCK of OSINT feeds — AlienVault OTX (https://otx.alienvault.com) and AbuseIPDB (https://abuseipdb.com). Replace with real feed pulls.",
+  "indicators": [
+    {
+      "type": "ip",
+      "value": "185.220.101.47",
+      "abuse_confidence": 96,
+      "categories": ["c2", "malware-hosting"],
+      "associated_actor": "APT29",
+      "campaign": "Operation NightDrop"
+    },
+    {
+      "type": "ip",
+      "value": "45.137.21.9",
+      "abuse_confidence": 88,
+      "categories": ["c2"],
+      "associated_actor": "Lumma Stealer",
+      "campaign": "Lumma Logs Q2"
+    },
+    {
+      "type": "domain",
+      "value": "secure-update-cdn[.]com",
+      "abuse_confidence": 91,
+      "categories": ["phishing", "fakeupdate"],
+      "associated_actor": "APT29",
+      "campaign": "Operation NightDrop"
+    },
+    {
+      "type": "domain",
+      "value": "lumma-gate[.]xyz",
+      "abuse_confidence": 84,
+      "categories": ["c2", "stealer-panel"],
+      "associated_actor": "Lumma Stealer",
+      "campaign": "Lumma Logs Q2"
+    }
+  ]
+}
