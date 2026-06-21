@@ -138,12 +138,9 @@ export default function AnalysisResults() {
   const neighbors = clustering.neighbors || [];
   const running = job.status !== 'Completed' && job.status !== 'Failed';
 
-  // Engine badge: real static engine, optionally enriched by an external LLM.
-  const engineBadge = iocSource === 'static+llm'
-    ? { cls: 'engine live', text: 'Static + LLM' }
-    : iocSource === 'static_engine'
-      ? { cls: 'engine', text: 'Static Engine' }
-      : iocSource ? { cls: 'engine', text: iocSource } : null;
+  // Which AI engines produced this verdict (e.g. static / static+ml+llm).
+  const engineTokens = (iocSource || 'static_engine')
+    .replace('static_engine', 'static').split('+').filter(Boolean);
 
   // Group TTPs by ATT&CK tactic for the coverage matrix.
   const byTactic = {};
@@ -175,7 +172,9 @@ export default function AnalysisResults() {
       <div className="grid sidebar-2">
         <div className="card glow">
           <div className="card-head"><span className="ci"><IconAlert size={16} /></span><h3>Verdict</h3>
-            {engineBadge && <span className="right"><span className={`tag ${engineBadge.cls}`}><IconBrain size={13} /> {engineBadge.text}</span></span>}
+            <span className="right">{engineTokens.map((t) => (
+              <span key={t} className={`tag engine ${t !== 'static' ? 'live' : ''}`} style={{ marginLeft: 6 }}>{t.toUpperCase()}</span>
+            ))}</span>
           </div>
           <VerdictRing score={score} severity={severity} />
         </div>

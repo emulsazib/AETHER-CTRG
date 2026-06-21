@@ -29,3 +29,14 @@ export async function workerHealth() {
     return { status: 'unreachable', error: err.message };
   }
 }
+
+// AI-engine configuration passthrough (which engines are available / enabled).
+export async function getAiConfig() {
+  const { data } = await client.get('/config');
+  return data;
+}
+
+export async function setAiConfig(body) {
+  const { data } = await client.post('/config', body);
+  return data;
+}

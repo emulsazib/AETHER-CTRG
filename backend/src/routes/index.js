@@ -4,6 +4,7 @@ import ingestRoutes from './ingest.routes.js';
 import analysisRoutes from './analysis.routes.js';
 import threatGraphRoutes from './threatGraph.routes.js';
 import feedbackRoutes from './feedback.routes.js';
+import aiConfigRoutes from './aiConfig.routes.js';
 import { workerHealth } from '../services/mlClient.js';
 import { isMongoConnected } from '../config/mongo.js';
 import { isNeo4jConnected } from '../config/neo4j.js';
@@ -24,5 +25,6 @@ router.use('/ingest', ingestRoutes);
 router.use('/analysis', analysisRoutes);
 router.use('/threat-graph', threatGraphRoutes);
 router.use('/feedback', feedbackRoutes);
+router.use('/ai-config', aiConfigRoutes);
 
 export default router;

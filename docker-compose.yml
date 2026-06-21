@@ -58,11 +58,18 @@ services:
       start_period: 30s
 
   ml-worker:
-    build: ./ml-worker
+    build:
+      context: ./ml-worker
+      args:
+        # Set INSTALL_ML=true to bake in the trained-classifier deps (torch/transformers).
+        INSTALL_ML: ${INSTALL_ML:-false}
     container_name: aether-ml-worker
     restart: unless-stopped
     ports:
       - "8000:8000"
+    volumes:
+      # Mount your trained model(s) read-only (see ml-worker/models/README.md).
+      - ./ml-worker/models:/models:ro
     environment:
       ML_WORKER_PORT: 8000
       # Allow the gateway (and host browser, for debugging) to call directly.
@@ -73,6 +80,14 @@ services:
       AI_API_KEY: ${AI_API_KEY:-}
       AI_BASE_URL: ${AI_BASE_URL:-}
       AI_MODEL: ${AI_MODEL:-gpt-4o-mini}
+      # --- Trained ML classifier engine (your own model) --------------------------
+      ML_CLASSIFIER_ENABLED: ${ML_CLASSIFIER_ENABLED:-false}
+      CLASSIFIER_PATH: ${CLASSIFIER_PATH:-}
+      CLASSIFIER_NAME: ${CLASSIFIER_NAME:-Trained ML Classifier}
+      CLASSIFIER_BACKEND: ${CLASSIFIER_BACKEND:-hf}
+      CLASSIFIER_MALICIOUS_INDEX: ${CLASSIFIER_MALICIOUS_INDEX:-1}
+      CLASSIFIER_THRESHOLD: ${CLASSIFIER_THRESHOLD:-0.5}
+      CLASSIFIER_MAX_LEN: ${CLASSIFIER_MAX_LEN:-512}
       # --- OpenCTI attribution push (pycti) ---------------------------------------
       # OPENCTI_ENABLED stays false unless you bring up the `opencti` profile below.
       OPENCTI_ENABLED: ${OPENCTI_ENABLED:-false}

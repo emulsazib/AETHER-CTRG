@@ -7,9 +7,10 @@ import Dashboard from './components/Dashboard/Dashboard.jsx';
 import Ingestion from './components/Ingestion/Ingestion.jsx';
 import AnalysisResults from './components/AnalysisResults/AnalysisResults.jsx';
 import ThreatGraph from './components/ThreatGraph/ThreatGraph.jsx';
+import AiEngines from './components/Settings/AiEngines.jsx';
 import { useHealth } from './hooks/useHealth.js';
 import {
-  IconShield, IconGrid, IconUpload, IconScan, IconGraph, IconClock,
+  IconShield, IconGrid, IconUpload, IconScan, IconGraph, IconClock, IconChip,
 } from './components/common/Icons.jsx';
 
 function StatusPill({ label, state }) {
@@ -33,7 +34,7 @@ function TopBar() {
     <header className="topbar">
       <div className="brand">
         <span className="logo"><IconShield size={22} /></span>
-        AE<span>THER</span>
+        <span className="wordmark">AE<b>THER</b></span>
       </div>
       <div className="tagline">AI THREAT ANALYSIS &amp; ATTRIBUTION</div>
       <div className="spring" />
@@ -53,6 +54,7 @@ const NAV = [
   { to: '/ingest', label: 'Ingestion', Icon: IconUpload },
   { to: '/analysis', label: 'Analysis & XAI', Icon: IconScan, section: 'Intelligence' },
   { to: '/graph', label: 'Threat Graph', Icon: IconGraph },
+  { to: '/engines', label: 'AI Engines', Icon: IconChip, section: 'Configuration' },
 ];
 
 export default function App() {
@@ -83,6 +85,7 @@ export default function App() {
           <Route path="/analysis/:jobId" element={<AnalysisResults />} />
           <Route path="/graph" element={<ThreatGraph />} />
           <Route path="/graph/:anchorId" element={<ThreatGraph />} />
+          <Route path="/engines" element={<AiEngines />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>

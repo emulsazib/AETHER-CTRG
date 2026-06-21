@@ -19,3 +19,7 @@ npm-debug.log*
 
 # OS
 .DS_Store
+
+# Trained model weights (mount your own under ml-worker/models/)
+ml-worker/models/*
+!ml-worker/models/README.md

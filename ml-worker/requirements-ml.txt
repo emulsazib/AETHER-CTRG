@@ -1,0 +1,17 @@
+# Optional dependencies for the TRAINED ML CLASSIFIER engine.
+# These are NOT installed by default (they are large). Enable them by building the
+# worker with the ML build arg:
+#
+#     docker compose build --build-arg INSTALL_ML=true ml-worker
+#
+# or, for local dev:  pip install -r requirements-ml.txt
+#
+# CPU-only torch keeps the image small; for GPU install the matching CUDA build.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch>=2.2
+transformers>=4.38
+
+# For exported ONNX models (CLASSIFIER_BACKEND=onnx) — smaller & faster on CPU.
+# Uncomment instead of torch if you only run ONNX:
+# onnxruntime>=1.17
+# numpy>=1.26

@@ -34,4 +34,10 @@ export const endpoints = {
   health() {
     return api.get('/health');
   },
+  getAiConfig() {
+    return api.get('/ai-config');
+  },
+  setAiConfig(payload) {
+    return api.post('/ai-config', payload);
+  },
 };

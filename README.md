@@ -56,15 +56,31 @@ Detection runs on the **real bytes** of each upload — no trained model or inte
 | Integration | Status | Purpose | Enable with |
 |---|---|---|---|
 | **Static detection engine** | ✅ Built-in, always on | Real content-based malware detection | nothing — works offline |
-| **External LLM** (OpenAI-compatible) | ⚙️ Optional | Enriches IoC/TTP extraction & summaries on obfuscated artifacts | `AI_API_KEY` / `AI_BASE_URL` / `AI_MODEL` |
+| **Trained ML classifier** (your model) | ⚙️ Optional, **toggleable** | Your model's score is ensembled into the verdict | mount model + `INSTALL_ML=true` + UI toggle |
+| **External LLM** (OpenAI-compatible) | ⚙️ Optional, **toggleable** | Enriches IoC/TTP extraction & summaries on obfuscated artifacts | `AI_API_KEY` / `AI_BASE_URL` / `AI_MODEL` |
 | **OpenCTI + pycti** (STIX2) | ⚙️ Optional | Pushes IoCs/TTPs for automated actor/campaign attribution (MITRE connector) | `--profile opencti` + `OPENCTI_ENABLED=true` |
 | **MongoDB** | ✅ Default | Persists analysis jobs | bundled in compose |
 | **Neo4j** | ✅ Default | Threat-correlation graph | bundled in compose |
 
 The external LLM works against **any** OpenAI-compatible endpoint — OpenAI, a self-hosted
-vLLM/LiteLLM gateway, or Anthropic's OpenAI-compat endpoint. When configured, the verdict
-badge shows **Static + LLM**; otherwise **Static Engine**. There is **no local Ollama** —
+vLLM/LiteLLM gateway, or Anthropic's OpenAI-compat endpoint. There is **no local Ollama** —
 LLM processing is routed entirely through the external API.
+
+### Choosing & toggling AI engines (UI)
+Open **AI Engines** in the sidebar to pick which AI systems power detection and turn each
+on/off **live, without a restart**:
+
+- **Static Engine** — always on (cannot be disabled).
+- **Trained ML Classifier** — your model; available once mounted + built with ML deps.
+- **External LLM** — available once an API key is configured.
+
+Each analysis is tagged with the engines that produced it (e.g. `static`, `static+ml`,
+`static+ml+llm`), shown as chips on the verdict. Toggles are also scriptable via the API:
+```bash
+curl http://localhost:4000/api/v1/ai-config                              # list engines
+curl -X POST http://localhost:4000/api/v1/ai-config \
+     -H 'Content-Type: application/json' -d '{"ml_enabled":true,"llm_enabled":false}'
+```
 
 ---
 
@@ -130,10 +146,65 @@ OPENCTI_TOKEN=<same value as OPENCTI_ADMIN_TOKEN>
 and restart the worker: `docker compose up -d ml-worker`. Each analysis then pushes
 Indicators + Attack-Patterns + a Report into OpenCTI via pycti.
 
+### Tier 4 — Plug in YOUR trained model (optional)
+
+Train a model on a malware dataset, then wire it in as the **ML classifier** engine. Its
+score is **ensembled** with the static engine (definitive signature hits are preserved;
+the model raises the score on what signatures miss).
+
+**1. Export your model** into a folder — either:
+- a HuggingFace `AutoModelForSequenceClassification` (a fine-tuned transformer/LLM with a
+  classification head: `config.json`, `model.safetensors`, tokenizer files), or
+- an exported **ONNX** model (`model.onnx` + tokenizer) for a smaller/faster CPU footprint.
+
+**2. Mount it** under `ml-worker/models/` (git-ignored):
+```
+ml-worker/models/malware-clf/
+├── config.json
+├── model.safetensors        # or model.onnx
+└── tokenizer.json …
+```
+
+**3. Configure** in [.env](.env):
+```bash
+INSTALL_ML=true                       # build the worker with torch/transformers
+ML_CLASSIFIER_ENABLED=true            # default the engine on (also toggleable in UI)
+CLASSIFIER_PATH=/models/malware-clf   # path INSIDE the container
+CLASSIFIER_NAME=my-malware-clf-v1
+CLASSIFIER_BACKEND=hf                 # hf | onnx
+CLASSIFIER_MALICIOUS_INDEX=1          # which output index means "malicious"
+CLASSIFIER_THRESHOLD=0.5
+```
+
+**4. Build with ML deps & restart** the worker:
+```bash
+INSTALL_ML=true docker compose build ml-worker
+docker compose up -d ml-worker
+```
+
+**5. Verify** — the **AI Engines** page shows *ML Classifier → Enabled*; new analyses are
+tagged `static+ml` and the model score appears as the top feature in the SHAP chart.
+
+> **Accuracy is in the preprocessing.** Inference features **must** match how you trained.
+> The default `_features()` in `ml-worker/app/models/classifier.py` feeds the decoded
+> content as text — edit it if your model expects byte/PE/image features. Also confirm
+> `CLASSIFIER_MALICIOUS_INDEX` and calibrate `CLASSIFIER_THRESHOLD` from your PR curve to
+> hit your target false-positive rate. For best results, route per `file_type` to
+> specialized models. Turn the engine off anytime from the **AI Engines** page.
+
+#### A fine-tuned *generative* LLM instead?
+If you fine-tuned a generative LLM (not a classifier head), **serve it** OpenAI-compatible
+(vLLM / TGI / llama.cpp) and point the LLM engine at it — no code change:
+```bash
+AI_API_KEY=...   AI_BASE_URL=http://your-llm-host:8000/v1   AI_MODEL=my-finetuned-llm
+```
+It then enriches IoC/TTP extraction (badge `static+llm`). For the malicious/benign
+*verdict*, the classifier route above is far more accurate than a generative model.
+
 ### Using it
 Drag a file into **Ingestion** → watch **Analysis & XAI** auto-update (verdict ring,
 detection signals, IoCs, ATT&CK coverage, stego, FAISS similarity, SHAP/LIME) → submit
-analyst **feedback** → pivot into the **Threat Graph**.
+analyst **feedback** → pivot into the **Threat Graph**. Choose engines under **AI Engines**.
 
 Quick CLI smoke test (EICAR — a harmless industry-standard AV test file):
 ```bash
@@ -174,9 +245,11 @@ npm run dev                           # :5173
 | GET | `/analysis` | Recent detections (dashboard feed) |
 | GET | `/threat-graph/:id` | Correlation subgraph (nodes/edges) |
 | POST | `/feedback` | Analyst correction (self-learning loop) |
+| GET | `/ai-config` | Which AI engines are available + enabled |
+| POST | `/ai-config` | Toggle `ml_enabled` / `llm_enabled` live |
 | GET | `/health` | Gateway + Mongo + Neo4j + worker status |
 
-Worker (`:8000`): `POST /analyze`, `GET /health`, `GET /docs`.
+Worker (`:8000`): `POST /analyze`, `GET/POST /config`, `GET /health`, `GET /docs`.
 
 ---
 
@@ -184,9 +257,14 @@ Worker (`:8000`): `POST /analyze`, `GET /health`, `GET /docs`.
 
 | Variable | Where | Default | Meaning |
 |---|---|---|---|
-| `AI_API_KEY` | worker | _(empty)_ | external LLM key; empty ⇒ static-only |
+| `AI_API_KEY` | worker | _(empty)_ | external LLM key; empty ⇒ LLM engine unavailable |
 | `AI_BASE_URL` | worker | _(empty)_ | OpenAI-compatible endpoint |
 | `AI_MODEL` | worker | `gpt-4o-mini` | model id |
+| `INSTALL_ML` | build | `false` | bake torch/transformers into the image |
+| `ML_CLASSIFIER_ENABLED` | worker | `false` | default the ML engine on (also UI-toggleable) |
+| `CLASSIFIER_PATH` | worker | _(empty)_ | container path to your model dir |
+| `CLASSIFIER_NAME` / `CLASSIFIER_BACKEND` | worker | `Trained ML Classifier` / `hf` | display name; `hf` or `onnx` |
+| `CLASSIFIER_MALICIOUS_INDEX` / `CLASSIFIER_THRESHOLD` | worker | `1` / `0.5` | malicious output index; decision threshold |
 | `OPENCTI_ENABLED` | worker | `false` | turn on the STIX2 push |
 | `OPENCTI_URL` / `OPENCTI_TOKEN` | worker | `http://opencti:8080` / _(empty)_ | OpenCTI target + token |
 | `MONGO_PASSWORD` / `NEO4J_PASSWORD` | compose | `aether_dev_pw` | DB credentials |
@@ -199,6 +277,8 @@ Worker (`:8000`): `POST /analyze`, `GET /health`, `GET /docs`.
 | Component | Status | File |
 |---|---|---|
 | Static detection engine (signatures, formats, IoCs, entropy, verdict, XAI) | ✅ **Real** | `ml-worker/app/detect/` |
+| Trained ML classifier (your model, ensembled) | ✅ Real (when mounted + enabled) | `ml-worker/app/models/classifier.py` |
+| AI-engine selection / live toggles | ✅ Real | `ml-worker/app/config_state.py`, `routes/config.py` |
 | External LLM IoC/TTP enrichment | ✅ Real (when configured) | `ml-worker/app/models/llm.py` |
 | OpenCTI STIX2 push | ✅ Real (when enabled) | `ml-worker/app/integrations/opencti.py` |
 | Image / text embeddings, FAISS neighbors | ⚠️ Lightweight context | `ml-worker/app/models/`, `pipeline/clustering.py` |

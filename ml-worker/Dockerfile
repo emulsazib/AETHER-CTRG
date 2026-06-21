@@ -4,9 +4,14 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install dependencies first for layer caching.
-COPY requirements.txt ./
+# Base dependencies first for layer caching.
+COPY requirements.txt requirements-ml.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Optional: install the trained-ML-classifier deps (torch/transformers).
+# Enable with:  docker compose build --build-arg INSTALL_ML=true ml-worker
+ARG INSTALL_ML=false
+RUN if [ "$INSTALL_ML" = "true" ]; then pip install --no-cache-dir -r requirements-ml.txt; fi
 
 # App source.
 COPY . .
