@@ -5,12 +5,12 @@ import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import ForceGraph2D from 'react-force-graph-2d';
 import { useThreatGraph } from '../../hooks/useThreatGraph.js';
+import { IconGraph, IconCrosshair } from '../common/Icons.jsx';
 
-// 'all' is a sentinel: backend returns the full graph when no node matches it.
 const DEFAULT_ANCHOR = 'all';
 
 const COLORS = {
-  ThreatActor: '#ff5d6c',
+  ThreatActor: '#ff3b5c',
   MalwareSample: '#4cc9f0',
   TTP: '#7b61ff',
   IP_Address: '#ffb703',
@@ -23,62 +23,74 @@ export default function ThreatGraph() {
   const [active, setActive] = useState(anchorId || DEFAULT_ANCHOR);
   const { graph, loading, error } = useThreatGraph(active);
 
-  // react-force-graph wants { nodes, links } with link.source/target ids.
   const graphData = {
     nodes: graph.nodes.map((n) => ({ ...n })),
     links: graph.edges.map((e) => ({ source: e.source, target: e.target, type: e.type })),
   };
 
+  const counts = graph.nodes.reduce((m, n) => { m[n.label] = (m[n.label] || 0) + 1; return m; }, {});
+
   return (
     <div>
-      <h1 className="page-title">Threat Actor Graph Explorer</h1>
+      <div className="page-head">
+        <div>
+          <h1 className="page-title"><span className="accenticon"><IconGraph size={22} /></span>Threat Correlation Graph</h1>
+          <p className="page-sub">STIX2-style relationships across samples, actors, TTPs &amp; infrastructure</p>
+        </div>
+      </div>
 
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="row">
+          <span className="ci" style={{ color: 'var(--accent)' }}><IconCrosshair size={18} /></span>
           <input
-            className="mono"
-            style={{ flex: 1, padding: 10, background: 'var(--panel-2)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text)' }}
+            className="input mono"
+            style={{ flex: 1 }}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Anchor node id/name (e.g. APT29, sample:f00dcafe, all)"
+            onKeyDown={(e) => e.key === 'Enter' && setActive(query)}
+            placeholder="Anchor node (e.g. APT29, sample:f00dcafe, all)"
           />
-          <button className="btn" onClick={() => setActive(query)}>Explore</button>
+          <button className="btn" onClick={() => setActive(query)}><IconGraph size={16} />Explore</button>
         </div>
-        <div className="row" style={{ marginTop: 10 }}>
+        <div className="row" style={{ marginTop: 14 }}>
           {Object.entries(COLORS).map(([label, color]) => (
-            <span key={label} className="muted" style={{ fontSize: 12 }}>
-              <span style={{ display: 'inline-block', width: 10, height: 10, background: color, borderRadius: 3, marginRight: 5 }} />
-              {label}
+            <span key={label} className="chip-legend">
+              <span className="sw" style={{ background: color }} />
+              {label.replace('_', ' ')} {counts[label] ? <span className="muted-2">· {counts[label]}</span> : null}
             </span>
           ))}
         </div>
       </div>
 
-      {loading && <p className="muted">Loading graph…</p>}
-      {error && <p style={{ color: 'var(--danger)' }}>Error: {error}</p>}
+      {loading && <p className="muted"><span className="scanline">▮</span> Loading graph…</p>}
+      {error && <div className="banner crit">{error}</div>}
 
-      <div className="card" style={{ height: 560, padding: 0, overflow: 'hidden' }}>
+      <div className="card glow" style={{ height: 580, padding: 0, overflow: 'hidden' }}>
         {graphData.nodes.length === 0 ? (
-          <p className="muted" style={{ padding: 20 }}>No nodes for this anchor.</p>
+          <div className="empty" style={{ paddingTop: 220 }}><span className="eico"><IconGraph size={34} /></span><div>No nodes for this anchor.</div></div>
         ) : (
           <ForceGraph2D
             graphData={graphData}
-            backgroundColor="#0b0f17"
+            backgroundColor="#070b12"
             nodeRelSize={6}
-            nodeColor={(n) => COLORS[n.label] || '#8da2bd'}
+            nodeColor={(n) => COLORS[n.label] || '#8094b0'}
             nodeLabel={(n) => `${n.label}: ${n.name}`}
-            linkColor={() => '#314257'}
+            linkColor={() => '#243349'}
+            linkWidth={1}
             linkDirectionalArrowLength={4}
             linkDirectionalArrowRelPos={1}
+            linkDirectionalParticles={1}
+            linkDirectionalParticleWidth={1.6}
+            linkDirectionalParticleColor={() => '#4cc9f0'}
             linkLabel={(l) => l.type}
             nodeCanvasObjectMode={() => 'after'}
             nodeCanvasObject={(node, ctx, globalScale) => {
               const label = node.name;
               const fontSize = 11 / globalScale;
               ctx.font = `${fontSize}px Inter, sans-serif`;
-              ctx.fillStyle = '#e6edf6';
+              ctx.fillStyle = '#cdd9ea';
               ctx.textAlign = 'center';
-              ctx.fillText(label, node.x, node.y + 10);
+              ctx.fillText(label, node.x, node.y + 11);
             }}
           />
         )}

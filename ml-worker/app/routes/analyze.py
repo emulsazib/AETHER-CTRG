@@ -8,9 +8,10 @@ from __future__ import annotations
 
 from typing import Literal, Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, BackgroundTasks
 from pydantic import BaseModel, Field
 
+from app.integrations.opencti import push_to_opencti
 from app.pipeline import run_pipeline
 
 router = APIRouter()
@@ -29,10 +30,16 @@ class AnalyzeRequest(BaseModel):
 
 
 @router.post("/analyze")
-def analyze(req: AnalyzeRequest) -> dict:
+def analyze(req: AnalyzeRequest, background: BackgroundTasks) -> dict:
     # Deep sandboxing would, in a real system, also detonate the sample and merge
     # dynamic behavior. The mock pipeline annotates the mode for the UI.
     result = run_pipeline(req.model_dump())
     result["sandbox_mode"] = req.sandbox_mode
     result["file_name"] = req.file_name
+
+    # Push STIX2 (IoCs + TTPs) to OpenCTI for automated attribution. Runs AFTER the
+    # response returns so pycti's HTTP calls never add latency to the gateway, and it
+    # no-ops unless OPENCTI_ENABLED. Failures are swallowed inside push_to_opencti.
+    background.add_task(push_to_opencti, result, req.file_name)
+
     return result

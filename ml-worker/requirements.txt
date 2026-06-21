@@ -6,3 +6,10 @@ fastapi>=0.115
 uvicorn[standard]>=0.30
 pydantic>=2.9
 python-dotenv>=1.0
+
+# External AI integration: any OpenAI-compatible gateway (OpenAI, vLLM, LiteLLM,
+# Anthropic OpenAI-compat, self-hosted). Configured via AI_API_KEY/AI_BASE_URL/AI_MODEL.
+openai>=1.40
+
+# OpenCTI client — pushes extracted IoCs/TTPs as STIX2 for automated attribution.
+pycti>=6.0.0

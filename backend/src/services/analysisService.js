@@ -9,7 +9,10 @@ import { requestAnalysis } from './mlClient.js';
 // Best-effort guess of the threat actor from extracted IoCs, used to wire the
 // sample into the graph. Mirrors the mock OSINT associations.
 function inferActor(iocs = []) {
-  const joined = iocs.join(' ').toLowerCase();
+  // Refang first so defanged indicators (e.g. 45[.]137[.]21[.]9, hxxp://) match.
+  const joined = iocs.join(' ').toLowerCase()
+    .replace(/\[\.\]/g, '.').replace(/\[:\]/g, ':')
+    .replace(/hxxps/g, 'https').replace(/hxxp/g, 'http');
   if (joined.includes('lumma') || joined.includes('45.137.21.9')) return 'Lumma Stealer';
   if (joined.includes('secure-update-cdn') || joined.includes('185.220.101.47')) return 'APT29';
   return null;

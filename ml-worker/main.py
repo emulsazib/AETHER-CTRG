@@ -39,6 +39,20 @@ app.add_middleware(
 app.include_router(analyze_router)
 
 
+@app.get("/")
+def root() -> dict:
+    """Friendly landing payload so the base URL isn't a bare 404."""
+    return {
+        "service": "aether-ml-worker",
+        "status": "ok",
+        "endpoints": {
+            "health": "GET /health",
+            "analyze": "POST /analyze",
+            "docs": "GET /docs",
+        },
+    }
+
+
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok", "service": "aether-ml-worker"}

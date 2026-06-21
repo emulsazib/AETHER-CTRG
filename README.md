@@ -1,126 +1,212 @@
-# AETHER Framework — MVP
+# AETHER — AI-Enabled Malware Analysis & Threat Attribution
 
-AI-powered automated **malware analysis & threat-actor attribution** platform.
-A modular microservices stack built with **mock AI models and mock data** so every
-mock can be swapped for a real implementation (PyTorch / HuggingFace / live OSINT)
-without touching the surrounding code.
+AETHER ingests cross-format artifacts (PDF · JavaScript · Images · Archives · binaries),
+performs **real static malware detection** on the actual file bytes, extracts IoCs and
+MITRE ATT&CK TTPs, explains every verdict, and correlates findings to threat actors —
+presented through a SOC-style operations console.
 
 ```
-┌────────────┐   HTTP    ┌─────────────────┐   HTTP    ┌──────────────────┐
-│  Frontend  │ ───────►  │  API Gateway    │ ───────►  │  AI/ML Worker    │
-│  React/Vite│           │  Node + Express │           │  Python + FastAPI│
-│  :5173     │ ◄───────  │  :4000          │ ◄───────  │  :8000           │
-└────────────┘           └────────┬────────┘           └──────────────────┘
-                                  │
-                     ┌────────────┴────────────┐
-                     ▼                          ▼
-               MongoDB :27017             Neo4j :7687
-            (AnalysisJobs)          (threat-correlation graph)
+┌────────────┐   HTTP    ┌─────────────────┐   HTTP    ┌──────────────────────┐
+│  Frontend  │ ───────►  │  API Gateway    │ ───────►  │   AI/ML Worker       │
+│ React/Vite │           │  Node + Express │           │  Python + FastAPI    │
+│  :5173     │ ◄───────  │  :4000          │ ◄───────  │  :8000               │
+└────────────┘           └────────┬────────┘           │  • static detect     │
+                                  │                     │    engine (real)     │
+                     ┌────────────┴────────────┐        │  • external LLM      │
+                     ▼                          ▼        │  • pycti → OpenCTI   │
+               MongoDB :27017             Neo4j :7687    └──────────┬───────────┘
+            (AnalysisJobs)          (threat graph)                  │ (optional)
+                                                                    ▼
+                                                   OpenCTI stack :8080 (attribution)
+                                            Redis · Elasticsearch · MinIO · RabbitMQ
 ```
 
-> **No Docker? No problem.** If MongoDB/Neo4j are unreachable the gateway falls
-> back to in-memory stores (pre-seeded), so the whole stack runs end-to-end
-> without any database installed. Data simply won't persist.
+> **Resilient by design.** If MongoDB/Neo4j are unreachable the gateway falls back to
+> pre-seeded in-memory stores, so the stack runs end-to-end even without databases
+> (data just won't persist).
 
 ---
 
-## Quick start
+## What it actually does
 
-### Option A — Full stack in Docker (recommended)
-Builds and runs **everything** (frontend + backend + ml-worker + MongoDB + Neo4j):
+Detection runs on the **real bytes** of each upload — no trained model or internet required:
+
+- **Signature engine** — weighted, MITRE-mapped rules (EICAR, embedded PE/MZ, encoded/
+  hidden PowerShell, download-and-execute, JS obfuscation, process-injection APIs,
+  registry persistence, LOLBins, VBA macros, clipboard/ClickFix) — `ml-worker/app/detect/signatures.py`
+- **Format analyzers** — PDF (`/JavaScript`, `/Launch`, `/EmbeddedFile`…), script heuristics,
+  archive inspection (nested EXE, double-extension, encrypted, zip-bomb), image
+  steganography/polyglot detection — `ml-worker/app/detect/formats.py`
+- **Forensics** — real SHA-256/SHA-1/MD5 hashes + Shannon entropy (packing detection)
+- **IoC extraction** — regex over content (IPs, domains, URLs, hashes, registry keys,
+  paths), de-noised and defanged — `ml-worker/app/detect/iocs.py`
+- **Risk verdict** — noisy-OR over all fired signals → `benign | suspicious | malicious`
+- **Explainability** — SHAP/LIME-style charts plotting the **real detection signals**
+  and their weights (the "why")
+
+> **Scope / honesty:** this is real **signature + heuristic static detection** (the class
+> used by many AV/triage front-ends). It is **not** a trained ML classifier and **not** a
+> dynamic sandbox — it does not execute samples, and novel malware that avoids all known
+> patterns can evade it. Use for research/education and triage, not as a production AV.
+
+---
+
+## Integrations
+
+| Integration | Status | Purpose | Enable with |
+|---|---|---|---|
+| **Static detection engine** | ✅ Built-in, always on | Real content-based malware detection | nothing — works offline |
+| **External LLM** (OpenAI-compatible) | ⚙️ Optional | Enriches IoC/TTP extraction & summaries on obfuscated artifacts | `AI_API_KEY` / `AI_BASE_URL` / `AI_MODEL` |
+| **OpenCTI + pycti** (STIX2) | ⚙️ Optional | Pushes IoCs/TTPs for automated actor/campaign attribution (MITRE connector) | `--profile opencti` + `OPENCTI_ENABLED=true` |
+| **MongoDB** | ✅ Default | Persists analysis jobs | bundled in compose |
+| **Neo4j** | ✅ Default | Threat-correlation graph | bundled in compose |
+
+The external LLM works against **any** OpenAI-compatible endpoint — OpenAI, a self-hosted
+vLLM/LiteLLM gateway, or Anthropic's OpenAI-compat endpoint. When configured, the verdict
+badge shows **Static + LLM**; otherwise **Static Engine**. There is **no local Ollama** —
+LLM processing is routed entirely through the external API.
+
+---
+
+## Requirements
+
+**Prerequisite (all tiers):** Docker + Docker Compose v2 (Docker Desktop or Docker Engine).
+No host install of Node / Python / Mongo / Neo4j is needed — everything is containerized.
+
+| Tier | RAM (free) | Disk | Internet | Notes |
+|---|---|---|---|---|
+| **Core app** (full detection) | ~3–4 GB | ~3 GB | not required | frontend + gateway + worker + Mongo + Neo4j |
+| **+ External LLM** | +~0 GB | — | **required** | a reachable OpenAI-compatible endpoint + key |
+| **+ OpenCTI** | **~8 GB+** | ~8–10 GB | not required | adds Redis/Elasticsearch/MinIO/RabbitMQ/OpenCTI |
+
+**Ports that must be free:** `5173` (UI), `4000` (gateway), `8000` (worker),
+`27017` (Mongo), `7474` & `7687` (Neo4j); with OpenCTI also `8080`.
+
+---
+
+## Run the application
+
+### Tier 1 — Core app (this is all you need for malware detection)
 ```bash
-docker compose up --build
+cd AETHER-CTRG
+cp .env.example .env          # one-time
+docker compose up -d --build
 ```
-Then open **http://localhost:5173**. First boot waits for the databases to pass
-their health checks, seeds mock data, then comes online. Tear down with
-`docker compose down` (add `-v` to also drop the database volumes).
+Open **http://localhost:5173**. Runs fully **offline, no API keys**. First boot waits for
+the DB health checks, seeds mock graph/actor data, then comes online.
 
 | Service | URL |
-|---------|-----|
-| Frontend | http://localhost:5173 |
-| API Gateway | http://localhost:4000 |
-| ML Worker | http://localhost:8000 |
-| Neo4j browser | http://localhost:7474 |
+|---|---|
+| Frontend (SOC console) | http://localhost:5173 |
+| API Gateway | http://localhost:4000/api/v1 |
+| AI/ML Worker | http://localhost:8000 (`/docs` for Swagger) |
+| Neo4j browser | http://localhost:7474 (`neo4j` / value of `NEO4J_PASSWORD`) |
+
+Tear down with `docker compose down` (add `-v` to also drop DB volumes).
+
+### Tier 2 — Add external LLM enrichment (optional)
+Edit [.env](.env):
+```bash
+AI_API_KEY=sk-...                       # your provider key
+AI_BASE_URL=https://api.openai.com/v1   # or any OpenAI-compatible gateway
+AI_MODEL=gpt-4o-mini
+```
+then apply to the worker only:
+```bash
+docker compose up -d ml-worker
+```
+Ingest a new sample → the Analysis view badge reads **Static + LLM**.
+
+### Tier 3 — Add OpenCTI attribution (optional, ~8 GB RAM)
+```bash
+docker compose --profile opencti up -d --build
+```
+Wait for the platform at **http://localhost:8080** (login `OPENCTI_ADMIN_EMAIL` /
+`OPENCTI_ADMIN_PASSWORD`) and let the MITRE connector seed. Then in [.env](.env):
+```bash
+OPENCTI_ENABLED=true
+OPENCTI_TOKEN=<same value as OPENCTI_ADMIN_TOKEN>
+```
+and restart the worker: `docker compose up -d ml-worker`. Each analysis then pushes
+Indicators + Attack-Patterns + a Report into OpenCTI via pycti.
+
+### Using it
+Drag a file into **Ingestion** → watch **Analysis & XAI** auto-update (verdict ring,
+detection signals, IoCs, ATT&CK coverage, stego, FAISS similarity, SHAP/LIME) → submit
+analyst **feedback** → pivot into the **Threat Graph**.
+
+Quick CLI smoke test (EICAR — a harmless industry-standard AV test file):
+```bash
+printf 'X5O!P%%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*' > /tmp/eicar.com
+curl -s -F file=@/tmp/eicar.com -F sandbox_mode=Immediate http://localhost:4000/api/v1/ingest
+```
 
 ---
 
-### Option B — Run services locally (dev)
+## Local dev (without rebuilding containers)
 
-#### 0. (Optional) Databases only
 ```bash
-cp .env.example .env
-docker compose up -d mongo neo4j     # just the datastores
-```
+# datastores only
+docker compose up -d mongo neo4j
 
-#### 1. AI/ML Worker (Python)
-```bash
-cd ml-worker
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
+# worker
+cd ml-worker && python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt && cp .env.example .env
 uvicorn main:app --reload --port 8000
-```
 
-### 2. API Gateway (Node)
-```bash
-cd backend
-npm install
-cp .env.example .env
-npm run seed     # seeds Mongo + Neo4j (skips gracefully if not running)
-npm run dev      # http://localhost:4000
-```
+# gateway
+cd backend && npm install && cp .env.example .env
+npm run seed && npm run dev          # :4000
 
-### 3. Frontend (React)
-```bash
-cd frontend
-npm install
-cp .env.example .env
-npm run dev      # http://localhost:5173
+# frontend
+cd frontend && npm install && cp .env.example .env
+npm run dev                           # :5173
 ```
-
-Open **http://localhost:5173**, drag a file into **Data Ingestion**, watch the
-**Analysis & XAI** view auto-update, then open the **Threat Graph**.
 
 ---
 
 ## API (gateway, prefix `/api/v1`)
 
-| Method | Path                  | Purpose                                         |
-|--------|-----------------------|-------------------------------------------------|
-| POST   | `/ingest`             | Upload file → detect type → mock YARA → job_id  |
-| GET    | `/analysis/:id`       | Job status + features + IoCs + XAI payload      |
-| GET    | `/analysis`           | Recent ingestions (dashboard feed)             |
-| GET    | `/threat-graph/:id`   | Correlation subgraph (nodes/edges)             |
-| POST   | `/feedback`           | Analyst correction (self-learning loop)        |
-| GET    | `/health`             | Gateway + DB + ML-worker status                |
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/ingest` | Upload file → detect type → YARA pre-scan → job_id (202) |
+| GET | `/analysis/:id` | Verdict + signals + features + IoCs + TTPs + XAI |
+| GET | `/analysis` | Recent detections (dashboard feed) |
+| GET | `/threat-graph/:id` | Correlation subgraph (nodes/edges) |
+| POST | `/feedback` | Analyst correction (self-learning loop) |
+| GET | `/health` | Gateway + Mongo + Neo4j + worker status |
+
+Worker (`:8000`): `POST /analyze`, `GET /health`, `GET /docs`.
 
 ---
 
-## Where the mocks live (swap these for production)
+## Environment variables (key ones)
 
-| Mock | File | Replace with |
-|------|------|--------------|
-| ResNet image embeddings | `ml-worker/app/models/image_embedding.py` | real ResNet forward pass |
-| CLIP+LLM stego detector | `ml-worker/app/models/stego_detector.py` | CLIP + LSB extractor + LLM |
-| BERT text embeddings | `ml-worker/app/models/text_embedding.py` | HF AutoModel |
-| LLM IoC/TTP extractor | `ml-worker/app/models/ioc_extractor.py` | LLM structured-output call |
-| t-SNE/UMAP + FAISS | `ml-worker/app/pipeline/clustering.py` | umap-learn + faiss |
-| SHAP + LIME | `ml-worker/app/pipeline/xai.py` | shap + lime |
-| YARA scan | `backend/src/services/yaraScan.js` | `yara` binary / binding |
-| Mock datasets | `backend/data/*.json` | Splunk / MalwareBazaar / OSINT APIs |
-
-All models implement `BaseModelInference` (`ml-worker/app/models/base.py`) and are
-wired in the registry at `ml-worker/app/pipeline/__init__.py` — change a single
-line there to go live.
+| Variable | Where | Default | Meaning |
+|---|---|---|---|
+| `AI_API_KEY` | worker | _(empty)_ | external LLM key; empty ⇒ static-only |
+| `AI_BASE_URL` | worker | _(empty)_ | OpenAI-compatible endpoint |
+| `AI_MODEL` | worker | `gpt-4o-mini` | model id |
+| `OPENCTI_ENABLED` | worker | `false` | turn on the STIX2 push |
+| `OPENCTI_URL` / `OPENCTI_TOKEN` | worker | `http://opencti:8080` / _(empty)_ | OpenCTI target + token |
+| `MONGO_PASSWORD` / `NEO4J_PASSWORD` | compose | `aether_dev_pw` | DB credentials |
+| `OPENCTI_ADMIN_*`, `MINIO_*`, `RABBITMQ_*` | compose | see `.env.example` | OpenCTI stack creds (profile only) |
 
 ---
 
-## Extensibility guarantees (per PRD §5)
-1. **Interface segregation** — every model behind `BaseModelInference`.
-2. **Env-driven config** — all URIs/keys in `.env` files, never hardcoded.
-3. **Component modularity** — React components fetch nothing directly; all I/O is
-   in custom hooks (`useAnalysisData`, `useThreatGraph`, `useIngest`).
-4. **Feedback loop** — `POST /api/v1/feedback` captures analyst corrections.
+## What's real vs. lightweight
 
-> ⚠️ For research/education only. No real malware, network calls, or live OSINT —
-> all data is synthetic.
+| Component | Status | File |
+|---|---|---|
+| Static detection engine (signatures, formats, IoCs, entropy, verdict, XAI) | ✅ **Real** | `ml-worker/app/detect/` |
+| External LLM IoC/TTP enrichment | ✅ Real (when configured) | `ml-worker/app/models/llm.py` |
+| OpenCTI STIX2 push | ✅ Real (when enabled) | `ml-worker/app/integrations/opencti.py` |
+| Image / text embeddings, FAISS neighbors | ⚠️ Lightweight context | `ml-worker/app/models/`, `pipeline/clustering.py` |
+| File-type detection, YARA pre-scan | ⚠️ Heuristic / mock | `backend/src/services/` |
+| Threat actor attribution | ⚠️ Heuristic (+ OpenCTI when enabled) | `backend/src/services/analysisService.js` |
+
+**Next upgrades:** real `yara-python` rule sets, a trained ML classifier (EMBER/PE
+features, CNN-LSTM) for zero-day coverage, and dynamic sandbox detonation — each slots in
+behind the existing interfaces.
+
+> ⚠️ Research / education use only. Detonate real malware only in isolated environments.
