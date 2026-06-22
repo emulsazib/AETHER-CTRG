@@ -1,0 +1,9 @@
+# AETHER dataset-builder (offline tool) dependencies.
+# Loose lower-bound pins for Python 3.10–3.14 wheel compatibility.
+
+# Required — PE/EXE static parsing (imports, DLLs).
+pefile>=2023.2.7
+
+# Optional — only needed for AES-encrypted zips (WinZip/7-Zip). MalwareBazaar uses
+# legacy ZipCrypto, which the stdlib handles, so this is usually NOT required.
+# pyzipper>=0.3.6

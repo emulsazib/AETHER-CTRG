@@ -23,3 +23,8 @@ npm-debug.log*
 # Trained model weights (mount your own under ml-worker/models/)
 ml-worker/models/*
 !ml-worker/models/README.md
+
+# Training data builder — never commit raw malware zips or generated datasets
+training/*.jsonl
+training/*.zip
+training/samples/
