@@ -1,0 +1,18 @@
+# GPU-ONLY dependencies for train_llama3_qlora.py (Unsloth QLoRA).
+# DO NOT install these on a CPU-only host — they require CUDA. Install inside a
+# Kaggle Notebook (T4 x2) or a GPU Jupyter environment.
+#
+# On Kaggle, the most reliable install is Unsloth's own one-liner (it pins compatible
+# torch/bitsandbytes/xformers for the runtime), e.g.:
+#
+#   !pip install -q "unsloth[kaggle-new] @ git+https://github.com/unslothai/unsloth.git"
+#   !pip install -q --no-deps "trl<0.9.0" peft accelerate bitsandbytes datasets
+#
+# The pins below are a portable fallback for a generic CUDA box:
+unsloth
+trl<0.9.0
+peft>=0.10.0
+transformers>=4.40.0
+datasets>=2.18.0
+accelerate>=0.29.0
+bitsandbytes>=0.43.0

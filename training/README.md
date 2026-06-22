@@ -63,10 +63,32 @@ labels before production training.
 
 ## Then fine-tune
 
-- **OpenAI:** `openai files create … --purpose fine-tune` → `openai fine_tuning.jobs create`
-  with `aether_openai_dataset.jsonl`.
-- **Unsloth/Llama 3:** load `aether_llama3_dataset.jsonl` as a `text`-field dataset into
-  `SFTTrainer`.
+Two ready-to-run scripts consume the datasets above.
+
+### 1. GPU-free cloud fine-tune — GPT-4o-mini (`finetune_openai.py`)
+Runs anywhere with Python + an OpenAI key.
+```bash
+pip install -r requirements.txt
+export AI_API_KEY=sk-...
+
+python finetune_openai.py --dry-run          # validate dataset, no spend
+python finetune_openai.py --suffix aether    # upload + launch the job
+python finetune_openai.py --watch            # (optional) stream events to completion
+```
+It prints the **File ID** and **Job ID**; track it at <https://platform.openai.com/finetune>.
+When done, set the resulting `fine_tuned_model` name as `AI_MODEL` in AETHER's `.env`.
+
+### 2. Local/Kaggle QLoRA — Llama-3-8B-Instruct (`train_llama3_qlora.py`)
+Requires a CUDA GPU (designed for a **free Kaggle T4**). Upload
+`aether_llama3_dataset.jsonl` alongside the script, then in a Kaggle/Jupyter cell:
+```python
+!pip install -q "unsloth[kaggle-new] @ git+https://github.com/unslothai/unsloth.git"
+!pip install -q --no-deps "trl<0.9.0" peft accelerate bitsandbytes datasets
+!python train_llama3_qlora.py
+```
+Unsloth + 4-bit QLoRA shrink the 8B model from ~16 GB → ~5–6 GB so it fits the T4; only
+small rank-16 LoRA adapters are trained and saved to `./aether_llama3_lora/`. Export to
+GGUF/merged-16bit or serve it OpenAI-compatible (vLLM) and point AETHER's LLM engine at it.
 
 ## Use the trained model in AETHER
 

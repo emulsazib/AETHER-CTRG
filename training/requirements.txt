@@ -4,6 +4,9 @@
 # Required — PE/EXE static parsing (imports, DLLs).
 pefile>=2023.2.7
 
+# Required by finetune_openai.py — OpenAI fine-tuning SDK.
+openai>=1.40
+
 # Optional — only needed for AES-encrypted zips (WinZip/7-Zip). MalwareBazaar uses
 # legacy ZipCrypto, which the stdlib handles, so this is usually NOT required.
 # pyzipper>=0.3.6

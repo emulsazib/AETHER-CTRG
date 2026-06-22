@@ -28,3 +28,7 @@ ml-worker/models/*
 training/*.jsonl
 training/*.zip
 training/samples/
+
+# Trained artifacts (LoRA adapters + checkpoints)
+training/aether_llama3_lora/
+training/outputs/
