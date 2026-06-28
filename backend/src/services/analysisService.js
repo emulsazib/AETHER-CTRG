@@ -4,15 +4,13 @@
 // job_id immediately and the frontend can poll for progress.
 import { jobRepository } from '../repositories/jobRepository.js';
 import { graphRepository } from '../repositories/graphRepository.js';
+import { refang } from '../utils/indicators.js';
 import { requestAnalysis } from './mlClient.js';
 
-// Best-effort guess of the threat actor from extracted IoCs, used to wire the
-// sample into the graph. Mirrors the mock OSINT associations.
+// Heuristic fallback when the worker's real OSINT attribution returns nothing
+// (no OSINT keys, or no external hits). Wires the sample into the graph.
 function inferActor(iocs = []) {
-  // Refang first so defanged indicators (e.g. 45[.]137[.]21[.]9, hxxp://) match.
-  const joined = iocs.join(' ').toLowerCase()
-    .replace(/\[\.\]/g, '.').replace(/\[:\]/g, ':')
-    .replace(/hxxps/g, 'https').replace(/hxxp/g, 'http');
+  const joined = iocs.map(refang).join(' ').toLowerCase();
   if (joined.includes('lumma') || joined.includes('45.137.21.9')) return 'Lumma Stealer';
   if (joined.includes('secure-update-cdn') || joined.includes('185.220.101.47')) return 'APT29';
   return null;
@@ -26,7 +24,10 @@ export async function runAnalysis(jobId, { fileType, fileName, contentB64, sandb
     await jobRepository.update(jobId, { status: 'ML_Analysis' });
     const result = await requestAnalysis({ fileType, fileName, contentB64, sandboxMode });
 
-    const actor = inferActor(result.extracted_iocs);
+    // Prefer the worker's real OSINT attribution; fall back to the heuristic.
+    const osintActor = result.attribution?.actor || null;
+    const actor = osintActor || inferActor(result.extracted_iocs);
+    const iocReputation = result.ioc_reputation || {};
 
     await jobRepository.update(jobId, {
       status: 'Completed',
@@ -37,6 +38,9 @@ export async function runAnalysis(jobId, { fileType, fileName, contentB64, sandb
       clustering: result.clustering || {},
       xai_payload: result.xai_payload || null,
       'metadata.inferred_actor': actor,
+      'metadata.attribution': result.attribution || null,
+      'metadata.attribution_source': osintActor ? 'osint' : (actor ? 'heuristic' : 'none'),
+      'metadata.ioc_reputation': iocReputation,
     });
 
     // Wire the analyzed sample into the threat-correlation graph.
@@ -47,6 +51,8 @@ export async function runAnalysis(jobId, { fileType, fileName, contentB64, sandb
       iocs: result.extracted_iocs || [],
       ttps: result.ttps || [],
       actor,
+      iocReputation,
+      attribution: result.attribution || null,
     });
   } catch (err) {
     console.error(`[analysis] job ${jobId} failed:`, err.message);

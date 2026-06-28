@@ -74,3 +74,35 @@ def extract_iocs_ttps(artifact_text: str, file_type: str) -> Dict[str, Any]:
         "ttps": list(data.get("ttps", []) or []),
         "summary": data.get("summary", "") or "",
     }
+
+
+_STEGO_DECODE_PROMPT = (
+    "You are a malware analyst. The following bytes were recovered from the "
+    "least-significant-bit plane of an image (possible steganography). If they "
+    "contain a command, URL, script, or readable payload, decode/interpret it in "
+    "ONE concise line. If they are just noise, reply exactly 'no meaningful payload'."
+)
+
+
+def decode_hidden(recovered_text: str, file_type: str) -> str:
+    """Interpret bytes recovered from an image's LSB plane via the external LLM.
+
+    Best-effort: raises on any failure (missing key, network, etc.) so the caller
+    can fall back to a raw preview of the recovered bytes.
+    """
+    if not is_configured():
+        raise RuntimeError("AI_API_KEY not configured — external LLM unavailable")
+
+    client = _client()
+    resp = client.chat.completions.create(
+        model=os.getenv("AI_MODEL", "gpt-4o-mini"),
+        messages=[
+            {"role": "system", "content": _STEGO_DECODE_PROMPT},
+            {
+                "role": "user",
+                "content": f"file_type={file_type}\nrecovered_bytes:\n{(recovered_text or '')[:1000]}",
+            },
+        ],
+        temperature=0,
+    )
+    return (resp.choices[0].message.content or "").strip()

@@ -42,12 +42,21 @@ def _backend() -> str:
 
 
 def is_available() -> Tuple[bool, str, Optional[str]]:
-    """Return (available, reason, display_name) without loading the model."""
+    """Return (available, reason, display_name) without loading the model.
+
+    ``CLASSIFIER_PATH`` may be either a local directory OR a HuggingFace Hub id
+    (e.g. ``ealvaradob/bert-finetuned-phishing``) which auto-downloads on first
+    use. ONNX models must be local (the bare ``model.onnx`` can't be hub-resolved).
+    """
     path = os.getenv("CLASSIFIER_PATH")
     if not path:
         return False, "CLASSIFIER_PATH not set", None
-    if not os.path.exists(path):
-        return False, f"model path not found: {path}", None
+    is_local = os.path.exists(path)
+    is_hub_id = (not is_local) and "/" in path and " " not in path
+    if not (is_local or is_hub_id):
+        return False, f"model path not found and not a hub id: {path}", None
+    if _backend() == "onnx" and not is_local:
+        return False, f"onnx backend requires a local path, got hub id: {path}", None
     try:
         if _backend() == "onnx":
             import onnxruntime  # noqa: F401
@@ -57,16 +66,22 @@ def is_available() -> Tuple[bool, str, Optional[str]]:
             from transformers import AutoModelForSequenceClassification, AutoTokenizer  # noqa: F401
     except Exception as exc:  # noqa: BLE001
         return False, f"ML deps not installed ({exc}); pip install -r requirements-ml.txt", None
-    return True, "ready", model_name()
+    reason = "ready" if is_local else "ready (auto-downloads on first use)"
+    return True, reason, model_name()
 
 
 def _features(data: bytes, file_type: str, text: str) -> str:
     """Turn an artifact into the model's input. MUST mirror your training pipeline.
 
-    Default: a compact textual view (type tag + decoded content). Replace with
-    your byte-/PE-/image-feature extraction if you trained on those.
+    Default: a compact textual view of the decoded content. The ``[type]`` tag is
+    opt-in via ``CLASSIFIER_PREFIX_TYPE`` — leave it OFF for general phishing/text
+    classifiers (the tag is out-of-distribution for them) and ON if you trained
+    your own model with it.
     """
-    return f"[{file_type}] {(text or '')[: int(os.getenv('CLASSIFIER_MAX_CHARS', '6000'))]}"
+    body = (text or "")[: int(os.getenv("CLASSIFIER_MAX_CHARS", "6000"))]
+    if os.getenv("CLASSIFIER_PREFIX_TYPE", "false").strip().lower() in {"1", "true", "yes", "on"}:
+        return f"[{file_type}] {body}"
+    return body
 
 
 def _load():
@@ -129,4 +144,49 @@ def predict(data: bytes, file_type: str, text: str) -> Optional[Dict[str, Any]]:
         }
     except Exception as exc:  # noqa: BLE001 — never break analysis on a model error
         logger.warning("classifier inference failed (%s)", exc)
+        return None
+
+
+def hf_bundle():
+    """Return (tokenizer, model) for the HF backend, or None. Used by SHAP/LIME.
+
+    Only valid when CLASSIFIER_BACKEND=hf and the model is available.
+    """
+    ok, _, _ = is_available()
+    if not ok or _backend() == "onnx":
+        return None
+    try:
+        kind, tok, model, _ = _load()
+        return (tok, model) if kind == "hf" else None
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("hf_bundle load failed (%s)", exc)
+        return None
+
+
+def predict_proba(texts):
+    """Classifier probabilities for a LIST of strings → ndarray [n, n_classes].
+
+    Matches LIME's classifier_fn contract. Returns None on any failure.
+    """
+    ok, _, _ = is_available()
+    if not ok:
+        return None
+    try:
+        kind, tok, model_or_sess, lib = _load()
+        max_len = int(os.getenv("CLASSIFIER_MAX_LEN", "512"))
+        if kind == "onnx":
+            np = lib
+            enc = tok(list(texts), truncation=True, max_length=max_len, padding=True, return_tensors="np")
+            feed = {k: v for k, v in enc.items() if k in {i.name for i in model_or_sess.get_inputs()}}
+            logits = model_or_sess.run(None, feed)[0]
+            e = np.exp(logits - logits.max(axis=-1, keepdims=True))
+            return e / e.sum(axis=-1, keepdims=True)
+        torch = lib
+        enc = tok(list(texts), truncation=True, max_length=max_len, padding=True, return_tensors="pt")
+        with torch.no_grad():
+            logits = model_or_sess(**enc).logits
+            probs = torch.softmax(logits, dim=-1).cpu().numpy()
+        return probs
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("predict_proba failed (%s)", exc)
         return None

@@ -25,7 +25,9 @@ load_dotenv()
 app = FastAPI(
     title="AETHER AI/ML Worker",
     version="0.1.0",
-    description="Mock malware-analysis inference pipeline (ResNet/BERT/CLIP/LLM mocks).",
+    description="Real malware-analysis inference pipeline "
+    "(CodeBERT/ResNet/CLIP embeddings, FAISS clustering, SHAP/LIME, HF classifier, "
+    "external LLM + OSINT; deterministic mock fallbacks when ML extras are absent).",
 )
 
 # CORS — allow the gateway (and, in dev, the frontend) to call directly.
@@ -39,6 +41,28 @@ app.add_middleware(
 
 app.include_router(analyze_router)
 app.include_router(config_router)
+
+
+@app.on_event("startup")
+def _warm_models() -> None:
+    """Pre-load the heavy classifier in a background thread when ML is enabled.
+
+    Keeps /health responsive immediately while the ~1.3GB model downloads/loads,
+    so the first /analyze doesn't pay the full cold-start latency. Best-effort.
+    """
+    import threading
+
+    def warm() -> None:
+        try:
+            from app import config_state
+            from app.models import classifier
+
+            if config_state.get_config()["engines"]["ml"]["enabled"]:
+                classifier.predict(b"warmup", "Unknown", "warmup")
+        except Exception:  # noqa: BLE001 — warm-up must never crash startup
+            pass
+
+    threading.Thread(target=warm, name="aether-warm", daemon=True).start()
 
 
 @app.get("/")

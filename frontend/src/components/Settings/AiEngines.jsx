@@ -19,11 +19,11 @@ function Switch({ on, disabled, onChange }) {
   );
 }
 
-const ICONS = { static: IconShield, ml: IconChip, llm: IconBrain };
+const ICONS = { static: IconShield, ml: IconChip, llm: IconBrain, osint: IconShield };
 
 export default function AiEngines() {
   const { config, loading, error, saving, refresh, toggle } = useAiConfig();
-  const engines = config?.engines ? ['static', 'ml', 'llm'].map((k) => config.engines[k]).filter(Boolean) : [];
+  const engines = config?.engines ? ['static', 'ml', 'llm', 'osint'].map((k) => config.engines[k]).filter(Boolean) : [];
   const active = engines.filter((e) => e.enabled).map((e) => e.id);
 
   return (
@@ -83,14 +83,16 @@ export default function AiEngines() {
               The <strong>Static Engine</strong> always produces a baseline verdict from the real file bytes.
               When enabled, the <strong>Trained ML Classifier</strong> score is <em>ensembled</em> with it
               (definitive signature hits are preserved; the model raises the score on what signatures miss).
-              The <strong>External LLM</strong> enriches IoC/TTP extraction and the summary. Each analysis is
-              tagged with the engines that ran (e.g. <span className="tag" style={{ margin: 0 }}>static+ml+llm</span>).
+              The <strong>External LLM</strong> enriches IoC/TTP extraction and the summary. <strong>OSINT</strong>
+              looks up IoC reputation (AbuseIPDB/OTX/VirusTotal) and attributes the sample to a threat actor.
+              Each analysis is tagged with the engines that ran (e.g. <span className="tag" style={{ margin: 0 }}>static+ml+llm+osint</span>).
             </p>
             <div className="spacer-sm" />
             <p className="muted-2" style={{ fontSize: 11.5 }}>
               ML unavailable? Build the worker with <span className="mono">--build-arg INSTALL_ML=true</span>, mount your
               model under <span className="mono">ml-worker/models/</span>, and set <span className="mono">CLASSIFIER_PATH</span>.
               LLM unavailable? Set <span className="mono">AI_API_KEY</span> / <span className="mono">AI_BASE_URL</span> / <span className="mono">AI_MODEL</span>.
+              OSINT unavailable? Set <span className="mono">ABUSEIPDB_API_KEY</span> / <span className="mono">OTX_API_KEY</span> / <span className="mono">VT_API_KEY</span>.
             </p>
           </div>
         </>

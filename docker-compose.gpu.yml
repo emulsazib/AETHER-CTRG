@@ -1,0 +1,19 @@
+# =============================================================================
+# GPU override — adds NVIDIA GPU access to the ml-worker.
+# Use ONLY on a host with an NVIDIA GPU + nvidia-container-toolkit:
+#
+#     docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+#
+# (Requesting the nvidia driver on a CPU/Mac host errors, which is why this lives
+#  in an opt-in override instead of the base compose file. With ML_DEVICE=auto the
+#  worker uses the GPU when this override is active and falls back to CPU otherwise.)
+# =============================================================================
+services:
+  ml-worker:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

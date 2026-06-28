@@ -2,6 +2,7 @@
 // Activated when Neo4j is unreachable (see graphRepository.js). Self-seeds from
 // the shared graphSeed so /threat-graph returns a meaningful subgraph.
 import { graphSeed } from '../../seed/graphSeedData.js';
+import { isIpv4, refang } from '../../utils/indicators.js';
 
 const nodes = new Map(graphSeed.nodes.map((n) => [n.id, n]));
 const edges = [...graphSeed.edges];
@@ -37,7 +38,12 @@ export const memoryGraphStore = {
   },
 
   // Upsert a freshly-analyzed sample and connect it to its IoCs/TTPs/actor.
-  async upsertSampleGraph({ jobId, fileName, fileType, iocs = [], ttps = [], actor }) {
+  // Kept in lockstep with the Neo4j path (graphRepository.js): same refang, same
+  // IP reputation props, same attribution stamp on the campaign edge.
+  async upsertSampleGraph({
+    jobId, fileName, fileType, iocs = [], ttps = [], actor,
+    iocReputation = {}, attribution = null,
+  }) {
     const sampleId = `sample:job:${jobId}`;
     nodes.set(sampleId, {
       id: sampleId,
@@ -48,19 +54,31 @@ export const memoryGraphStore = {
     if (actor) {
       const actorId = `actor:${actor.toLowerCase().replace(/\s+/g, '-')}`;
       if (!nodes.has(actorId)) nodes.set(actorId, { id: actorId, label: 'ThreatActor', name: actor, props: {} });
-      edges.push({ source: sampleId, target: actorId, type: 'BELONGS_TO_CAMPAIGN', props: {} });
+      edges.push({
+        source: sampleId,
+        target: actorId,
+        type: 'BELONGS_TO_CAMPAIGN',
+        props: { confidence: attribution?.confidence ?? null, source: attribution?.source || 'heuristic' },
+      });
     }
     for (const ttp of ttps) {
       const ttpId = `ttp:${ttp}`;
       if (!nodes.has(ttpId)) nodes.set(ttpId, { id: ttpId, label: 'TTP', name: ttp, props: {} });
       edges.push({ source: sampleId, target: ttpId, type: 'USES_TTP', props: {} });
     }
-    for (const ioc of iocs) {
-      if (/\d+\.\d+\.\d+\.\d+/.test(ioc)) {
-        const ipId = `ip:${ioc}`;
-        if (!nodes.has(ipId)) nodes.set(ipId, { id: ipId, label: 'IP_Address', name: ioc, props: {} });
-        edges.push({ source: sampleId, target: ipId, type: 'COMMUNICATES_WITH', props: {} });
-      }
+    for (const raw of iocs) {
+      const ip = refang(raw);
+      if (!isIpv4(ip)) continue;
+      const ipId = `ip:${ip}`;
+      const rep = iocReputation[ip]?.abuseipdb || {};
+      const props = {
+        ...(nodes.get(ipId)?.props || {}),
+        ...(rep.abuse_confidence != null ? { abuse_confidence: rep.abuse_confidence } : {}),
+        ...(rep.country ? { country: rep.country } : {}),
+        ...(rep.isp ? { isp: rep.isp } : {}),
+      };
+      nodes.set(ipId, { id: ipId, label: 'IP_Address', name: ip, props });
+      edges.push({ source: sampleId, target: ipId, type: 'COMMUNICATES_WITH', props: {} });
     }
     return { sampleId };
   },

@@ -3,6 +3,7 @@
 // edges:[{source,target,type,props}] }.
 import { getDriver, isNeo4jConnected } from '../config/neo4j.js';
 import { memoryGraphStore } from '../services/store/memoryGraphStore.js';
+import { isIpv4, refang } from '../utils/indicators.js';
 
 // Map a Neo4j node/relationship result set into the frontend graph shape.
 function mapNeoRecords(records) {
@@ -63,20 +64,31 @@ export const graphRepository = {
   async upsertSampleGraph(payload) {
     if (!isNeo4jConnected()) return memoryGraphStore.upsertSampleGraph(payload);
 
-    const { jobId, fileName, fileType, iocs = [], ttps = [], actor } = payload;
+    const {
+      jobId, fileName, fileType, iocs = [], ttps = [], actor,
+      iocReputation = {}, attribution = null,
+    } = payload;
+    const sampleId = `sample:job:${jobId}`;
     const session = getDriver().session();
     try {
       await session.run(
         `MERGE (s:MalwareSample {id: $sampleId})
          SET s.name = $fileName, s.file_type = $fileType, s.job_id = $jobId`,
-        { sampleId: `sample:job:${jobId}`, fileName, fileType, jobId },
+        { sampleId, fileName, fileType, jobId },
       );
       if (actor) {
+        // Stamp the campaign edge with OSINT attribution confidence/source when present.
         await session.run(
           `MERGE (a:ThreatActor {name: $actor})
            WITH a MATCH (s:MalwareSample {id: $sampleId})
-           MERGE (s)-[:BELONGS_TO_CAMPAIGN]->(a)`,
-          { actor, sampleId: `sample:job:${jobId}` },
+           MERGE (s)-[rel:BELONGS_TO_CAMPAIGN]->(a)
+           SET rel.confidence = $confidence, rel.source = $source`,
+          {
+            actor,
+            sampleId,
+            confidence: attribution?.confidence ?? null,
+            source: attribution?.source || 'heuristic',
+          },
         );
       }
       for (const ttp of ttps) {
@@ -84,18 +96,33 @@ export const graphRepository = {
           `MERGE (t:TTP {id: $ttpId}) SET t.name = $ttp
            WITH t MATCH (s:MalwareSample {id: $sampleId})
            MERGE (s)-[:USES_TTP]->(t)`,
-          { ttpId: `ttp:${ttp}`, ttp, sampleId: `sample:job:${jobId}` },
+          { ttpId: `ttp:${ttp}`, ttp, sampleId },
         );
       }
-      for (const ioc of iocs.filter((x) => /\d+\.\d+\.\d+\.\d+/.test(x))) {
+      for (const raw of iocs) {
+        const ip = refang(raw);
+        if (!isIpv4(ip)) continue;
+        // Reputation keyed by the refanged indicator (from the worker's OSINT).
+        const rep = iocReputation[ip]?.abuseipdb || {};
         await session.run(
-          `MERGE (ip:IP_Address {id: $ipId}) SET ip.name = $ioc
+          `MERGE (ip:IP_Address {id: $ipId})
+             SET ip.name = $ip,
+                 ip.abuse_confidence = coalesce($abuse, ip.abuse_confidence),
+                 ip.country = coalesce($country, ip.country),
+                 ip.isp = coalesce($isp, ip.isp)
            WITH ip MATCH (s:MalwareSample {id: $sampleId})
            MERGE (s)-[:COMMUNICATES_WITH]->(ip)`,
-          { ipId: `ip:${ioc}`, ioc, sampleId: `sample:job:${jobId}` },
+          {
+            ipId: `ip:${ip}`,
+            ip,
+            abuse: rep.abuse_confidence ?? null,
+            country: rep.country ?? null,
+            isp: rep.isp ?? null,
+            sampleId,
+          },
         );
       }
-      return { sampleId: `sample:job:${jobId}` };
+      return { sampleId };
     } finally {
       await session.close();
     }

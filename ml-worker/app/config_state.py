@@ -1,9 +1,11 @@
 """Runtime AI-engine configuration — what's available and what's currently on.
 
-Three detection engines can contribute to a verdict:
+Detection / enrichment engines that can contribute to a verdict:
   * static  — the built-in signature/heuristic engine (always on, cannot be disabled)
   * ml      — your trained classifier model (app/models/classifier.py)
   * llm     — an external OpenAI-compatible LLM (app/models/llm.py)
+  * osint   — external threat-intel (AbuseIPDB/OTX/VirusTotal) for IoC reputation
+              and threat-actor attribution (app/intel/osint.py)
 
 Availability is derived from the environment (key present / model files present).
 Enablement is a RUNTIME toggle (changed live via POST /config from the UI) and
@@ -16,7 +18,11 @@ import os
 from typing import Any, Dict, Optional
 
 # Runtime overrides. None => fall back to the env-derived default.
-_runtime: Dict[str, Optional[bool]] = {"ml_enabled": None, "llm_enabled": None}
+_runtime: Dict[str, Optional[bool]] = {
+    "ml_enabled": None,
+    "llm_enabled": None,
+    "osint_enabled": None,
+}
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -34,15 +40,29 @@ def _llm_availability():
     return available, ("ready" if available else "AI_API_KEY not set"), os.getenv("AI_MODEL", "gpt-4o-mini")
 
 
+def _osint_availability():
+    """Return (available, reason, display_name) for the OSINT enrichment engine."""
+    from app.intel import osint  # lazy: avoids importing provider SDKs at startup
+
+    avail, reason, providers = osint.enabled()
+    name = "OSINT (" + ", ".join(providers) + ")" if providers else "OSINT Threat Intel"
+    return avail, reason, name
+
+
 def get_config() -> Dict[str, Any]:
     ml_avail, ml_reason, ml_name = _ml_availability()
     llm_avail, llm_reason, llm_name = _llm_availability()
+    osint_avail, osint_reason, osint_name = _osint_availability()
 
     ml_default = _env_bool("ML_CLASSIFIER_ENABLED", False) and ml_avail
     llm_default = llm_avail  # if a key is configured, default the LLM engine on
+    osint_default = osint_avail  # default on when any OSINT key is present
 
     ml_enabled = ml_default if _runtime["ml_enabled"] is None else (_runtime["ml_enabled"] and ml_avail)
     llm_enabled = llm_default if _runtime["llm_enabled"] is None else (_runtime["llm_enabled"] and llm_avail)
+    osint_enabled = (
+        osint_default if _runtime["osint_enabled"] is None else (_runtime["osint_enabled"] and osint_avail)
+    )
 
     return {
         "engines": {
@@ -72,15 +92,30 @@ def get_config() -> Dict[str, Any]:
                 "locked": False,
                 "reason": llm_reason,
             },
+            "osint": {
+                "id": "osint",
+                "name": osint_name,
+                "description": "External threat-intel (AbuseIPDB/OTX/VirusTotal) for IoC reputation & actor attribution.",
+                "available": osint_avail,
+                "enabled": bool(osint_enabled),
+                "locked": False,
+                "reason": osint_reason,
+            },
         }
     }
 
 
-def update_config(ml_enabled: Optional[bool] = None, llm_enabled: Optional[bool] = None) -> Dict[str, Any]:
+def update_config(
+    ml_enabled: Optional[bool] = None,
+    llm_enabled: Optional[bool] = None,
+    osint_enabled: Optional[bool] = None,
+) -> Dict[str, Any]:
     if ml_enabled is not None:
         _runtime["ml_enabled"] = bool(ml_enabled)
     if llm_enabled is not None:
         _runtime["llm_enabled"] = bool(llm_enabled)
+    if osint_enabled is not None:
+        _runtime["osint_enabled"] = bool(osint_enabled)
     return get_config()
 
 
@@ -90,3 +125,7 @@ def is_ml_on() -> bool:
 
 def is_llm_on() -> bool:
     return get_config()["engines"]["llm"]["enabled"]
+
+
+def is_osint_on() -> bool:
+    return get_config()["engines"]["osint"]["enabled"]

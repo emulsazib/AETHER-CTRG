@@ -23,12 +23,12 @@ export function useAiConfig() {
 
   useEffect(() => { refresh(); }, [refresh]);
 
-  // engine: 'ml' | 'llm'  -> sends { ml_enabled } or { llm_enabled }
+  // engine: 'ml' | 'llm' | 'osint' -> sends { <engine>_enabled: value }
   const toggle = useCallback(async (engine, value) => {
     setSaving(true);
     setError(null);
     try {
-      const body = engine === 'ml' ? { ml_enabled: value } : { llm_enabled: value };
+      const body = { [`${engine}_enabled`]: value };
       const { data } = await endpoints.setAiConfig(body);
       setConfig(data);
     } catch (err) {

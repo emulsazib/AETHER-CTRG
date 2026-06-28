@@ -61,33 +61,61 @@ services:
     build:
       context: ./ml-worker
       args:
-        # Set INSTALL_ML=true to bake in the trained-classifier deps (torch/transformers).
-        INSTALL_ML: ${INSTALL_ML:-false}
+        # Real-model stack (torch/transformers/open_clip/faiss/shap/lime). Set to
+        # false for a lightweight mock-only image.
+        INSTALL_ML: ${INSTALL_ML:-true}
     container_name: aether-ml-worker
     restart: unless-stopped
     ports:
       - "8000:8000"
+    # GPU access is OPT-IN via the override file (a bare `compose up` must stay
+    # runnable on Mac/CPU hosts, where requesting the nvidia driver would error):
+    #     docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
     volumes:
       # Mount your trained model(s) read-only (see ml-worker/models/README.md).
       - ./ml-worker/models:/models:ro
+      # Persist downloaded weights (CodeBERT/CLIP/classifier ~1.5GB, ResNet) so
+      # they download once, and the per-modality FAISS index across restarts.
+      - hf_cache:/root/.cache/huggingface
+      - torch_cache:/root/.cache/torch
+      - faiss_index:/data/faiss
     environment:
       ML_WORKER_PORT: 8000
       # Allow the gateway (and host browser, for debugging) to call directly.
       ML_CORS_ORIGINS: http://localhost:4000,http://localhost:5173
-      EMBEDDING_DIM: 16
+      EMBEDDING_DIM: 16                       # only used by the mock fallback path
+      # --- Real-model runtime -----------------------------------------------------
+      ML_DEVICE: ${ML_DEVICE:-auto}           # auto|cpu|cuda|mps
+      HF_HOME: /root/.cache/huggingface
+      TEXT_EMBED_MODEL_ID: ${TEXT_EMBED_MODEL_ID:-microsoft/codebert-base}
+      CLIP_MODEL: ${CLIP_MODEL:-ViT-B-32}
+      CLIP_PRETRAINED: ${CLIP_PRETRAINED:-laion2b_s34b_b79k}
+      CLUSTER_INDEX_DIR: /data/faiss
       # --- External AI provider (any OpenAI-compatible gateway; replaces Ollama) ---
       # Leave AI_API_KEY blank to run the deterministic mock extractor instead.
       AI_API_KEY: ${AI_API_KEY:-}
       AI_BASE_URL: ${AI_BASE_URL:-}
       AI_MODEL: ${AI_MODEL:-gpt-4o-mini}
-      # --- Trained ML classifier engine (your own model) --------------------------
-      ML_CLASSIFIER_ENABLED: ${ML_CLASSIFIER_ENABLED:-false}
-      CLASSIFIER_PATH: ${CLASSIFIER_PATH:-}
-      CLASSIFIER_NAME: ${CLASSIFIER_NAME:-Trained ML Classifier}
+      # --- Trained ML classifier engine -------------------------------------------
+      # Defaults to a real HF model that auto-downloads on first use. Point at your
+      # own dir/hub-id to swap. Enabled by default (build needs INSTALL_ML=true).
+      ML_CLASSIFIER_ENABLED: ${ML_CLASSIFIER_ENABLED:-true}
+      CLASSIFIER_PATH: ${CLASSIFIER_PATH:-ealvaradob/bert-finetuned-phishing}
+      CLASSIFIER_NAME: ${CLASSIFIER_NAME:-bert-finetuned-phishing}
       CLASSIFIER_BACKEND: ${CLASSIFIER_BACKEND:-hf}
       CLASSIFIER_MALICIOUS_INDEX: ${CLASSIFIER_MALICIOUS_INDEX:-1}
       CLASSIFIER_THRESHOLD: ${CLASSIFIER_THRESHOLD:-0.5}
       CLASSIFIER_MAX_LEN: ${CLASSIFIER_MAX_LEN:-512}
+      CLASSIFIER_PREFIX_TYPE: ${CLASSIFIER_PREFIX_TYPE:-false}
+      # --- External OSINT threat-intel (best-effort, key-gated) -------------------
+      ABUSEIPDB_API_KEY: ${ABUSEIPDB_API_KEY:-}
+      OTX_API_KEY: ${OTX_API_KEY:-}
+      VT_API_KEY: ${VT_API_KEY:-}
+      OSINT_MAX_IPS: ${OSINT_MAX_IPS:-6}
+      OSINT_MAX_DOMAINS: ${OSINT_MAX_DOMAINS:-4}
+      OSINT_MAX_HASHES: ${OSINT_MAX_HASHES:-4}
+      OSINT_MAX_URLS: ${OSINT_MAX_URLS:-2}
+      OSINT_CACHE_TTL: ${OSINT_CACHE_TTL:-3600}
       # --- OpenCTI attribution push (pycti) ---------------------------------------
       # OPENCTI_ENABLED stays false unless you bring up the `opencti` profile below.
       OPENCTI_ENABLED: ${OPENCTI_ENABLED:-false}
@@ -98,6 +126,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+      # First boot downloads ~1.5GB of model weights — don't flap before that.
+      start_period: 180s
 
   backend:
     build: ./backend
@@ -116,7 +146,8 @@ services:
       NEO4J_USER: ${NEO4J_USER:-neo4j}
       NEO4J_PASSWORD: ${NEO4J_PASSWORD:-aether_dev_pw}
       ML_WORKER_URL: http://ml-worker:8000
-      ML_WORKER_TIMEOUT_MS: 15000
+      # Raised to absorb live OSINT lookups + first-call model download/inference.
+      ML_WORKER_TIMEOUT_MS: ${ML_WORKER_TIMEOUT_MS:-30000}
     depends_on:
       mongo:
         condition: service_healthy
@@ -271,6 +302,10 @@ volumes:
   mongo_data:
   neo4j_data:
   neo4j_logs:
+  # ml-worker real-model weight caches + persisted FAISS index.
+  hf_cache:
+  torch_cache:
+  faiss_index:
   # OpenCTI stack (only created when the `opencti` profile runs)
   redis_data:
   elastic_data:

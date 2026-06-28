@@ -13,3 +13,10 @@ openai>=1.40
 
 # OpenCTI client — pushes extracted IoCs/TTPs as STIX2 for automated attribution.
 pycti>=6.0.0
+
+# External OSINT threat-intel (best-effort, key-gated). Lightweight + torch-free,
+# so they live in the base image: AbuseIPDB (REST), AlienVault OTX, VirusTotal v3.
+requests>=2.31
+OTXv2>=1.5.12
+vt-py>=0.18
+

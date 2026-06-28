@@ -12,8 +12,8 @@ export async function readAiConfig(req, res, next) {
 
 export async function updateAiConfig(req, res, next) {
   try {
-    const { ml_enabled, llm_enabled } = req.body || {};
-    return res.json(await setAiConfig({ ml_enabled, llm_enabled }));
+    const { ml_enabled, llm_enabled, osint_enabled } = req.body || {};
+    return res.json(await setAiConfig({ ml_enabled, llm_enabled, osint_enabled }));
   } catch (err) {
     return next(err);
   }
